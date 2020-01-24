@@ -1,0 +1,335 @@
+﻿
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+int len;
+int fertilizerFlow;
+int season;
+float baseBiodiversity;
+float biodiversityFlow;
+float s1Yeild;
+float s2Yeild;
+float s3Yeild;
+float s2Biodiversity;
+float s3Biodiversity;
+
+RWStructuredBuffer<int> cubeThere;
+
+/*
+ blankField; // 0 // we dont actually need this
+ farmField; // 1
+ pollinator; // 2
+ prairie; // 3
+ riparianNoTree; // 4
+ riparianTrees; // 5
+ uplandTrees; // 6
+ river; // 7
+*/
+
+RWStructuredBuffer<float> cubeBuffer; // len*len * 8
+/*
+ blankField; // 0 // we dont actually need this
+ farmField; // 1
+ pollinator; // 2
+ prairie; // 3
+ riparianNoTree; // 4
+ riparianTrees; // 5
+ uplandTrees; // 6
+ waterbasin; // 7
+ height; // 8
+ waterbasinXd; // 9
+ waterbasinYd; // 10
+*/
+
+
+
+
+RWTexture2D<float4> yeildTextureResult;
+RWTexture2D<float4> minMapTexture;
+RWTexture2D<float4> biodiversityTextureResult;
+RWTexture2D<float4> biodiversityTextureBlurResult;
+RWTexture2D<float4> fertilizerTextureResult;
+
+[numthreads(8, 8, 1)] 
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+	// TODO: insert actual code here!
+	
+	int iter = id.y * len + id.x;
+
+	int iterYm1 = (id.y - 1) * len + id.x;
+	int iterXm1 = (id.y) * len + (id.x - 1);
+	int iterYp1 = (id.y + 1) * len + id.x;
+	int iterXp1 = (id.y) * len + (id.x + 1);
+
+	int iterYm1Xm1 = (id.y - 1) * len + (id.x - 1);
+	int iterYp1Xm1 = (id.y + 1) * len + (id.x - 1);
+	int iterYm1Xp1 = (id.y - 1) * len + (id.x + 1);
+	int iterYp1Xp1 = (id.y + 1) * len + (id.x + 1);
+
+	if (fertilizerFlow == 0) {
+		//calculating crop yeild
+		float yeildVal = 0;
+	
+		if (cubeThere[iter] == 1) {
+			//yeild value due to plant being there
+			yeildVal = cubeBuffer[len * len * cubeThere[iter] + iter] * s1Yeild;
+
+			//yeild value due to biodiversity blur s2
+			if (season == 2) {
+				yeildVal = cubeBuffer[len * len * cubeThere[iter] + iter] * s2Yeild;
+				yeildVal += biodiversityTextureBlurResult[id.xy].x * s2Biodiversity;
+			}
+
+			//yeild value due to biodiversity blur s3
+			if (season == 3) {
+				yeildVal = cubeBuffer[len * len * cubeThere[iter] + iter] * s3Yeild;
+				yeildVal += biodiversityTextureBlurResult[id.xy].x * s3Biodiversity;
+			}
+		}
+	
+
+
+
+		//calculating biodiversity 
+		float biodiversityNoComp = 0;
+		float biodiversityComp = 0;
+		float biodiversityTotal = 0;
+
+		if (cubeThere[iter] >= 2 && cubeThere[iter] <= 6) {
+			biodiversityNoComp = cubeBuffer[len * len * cubeThere[iter] + iter];
+		}
+
+
+
+		if ((id.x != 0) && (id.y != 0) && (id.x != len - 1) && (id.y != len - 1)) { // avoiding boundary cases
+			//calculating biodiversity comparison
+			if (cubeThere[iter] >= 2 && cubeThere[iter] <= 6) {
+				//checking left
+				if (cubeThere[iterXm1] >= 2 && cubeThere[iterXm1] <= 6) {
+					if (cubeThere[iter] != cubeThere[iterXm1]) {
+						biodiversityComp += 0.25;
+					}
+				}
+
+				//checking right
+				if (cubeThere[iterXp1] >= 2 && cubeThere[iterXp1] <= 6) {
+					if (cubeThere[iter] != cubeThere[iterXp1]) {
+						biodiversityComp += 0.25;
+					}
+				}
+
+				//checking top
+				if (cubeThere[iterYp1] >= 2 && cubeThere[iterYp1] <= 6) {
+					if (cubeThere[iter] != cubeThere[iterYp1]) {
+						biodiversityComp += 0.25;
+					}
+				}
+
+				//checking bottom
+				if (cubeThere[iterYm1] >= 2 && cubeThere[iterYm1] <= 6) {
+					if (cubeThere[iter] != cubeThere[iterYm1]) {
+						biodiversityComp += 0.25;
+					}
+				}
+			}
+		}
+
+		biodiversityTotal = biodiversityNoComp * baseBiodiversity;
+
+		// flow invariate
+		float a = cubeBuffer[len * len * 12 + iter];
+
+		// summing up
+		if (season == 2) biodiversityTotal = biodiversityNoComp * baseBiodiversity + biodiversityComp * s2Biodiversity; // s2
+		if (season == 3) biodiversityTotal = biodiversityNoComp * baseBiodiversity + biodiversityComp * s3Biodiversity; // s3
+
+		//setting values of textures
+		if (cubeThere[iter] == 7) { // if it enters the river
+			biodiversityTextureResult[id.xy] = float4(0, 0, 0, 1.0);
+			yeildTextureResult[id.xy] = float4(0, 0, 0, 1.0);
+		}
+		else {
+			biodiversityTextureResult[id.xy] = float4(biodiversityTotal * 0.6 + a * biodiversityFlow, biodiversityTotal * 0.6 + a * biodiversityFlow, biodiversityTotal * 0.6, 1.0);
+			yeildTextureResult[id.xy] = float4(yeildVal, yeildVal, yeildVal, 1.0);
+		}
+		
+
+		// minimap colors lol
+		if (cubeThere[iter] == 7) { // river
+			minMapTexture[id.yx] = float4(0, 0, 100, 1.0); //blue
+		}
+		if (cubeThere[iter] == 8) { // road
+			minMapTexture[id.yx] = float4(0, 0, 0, 1.0); //black
+		}
+		if (cubeThere[iter] == 0) { // empty
+			minMapTexture[id.yx] = float4(0, 0, 0, 0); //remove
+		}
+	
+
+		if (cubeThere[iter] == 1) { // farm
+			minMapTexture[id.yx] = float4(0.592, 0.475, 0.353, 1); 
+		}
+		if (cubeThere[iter] == 2) { // pollinator
+			minMapTexture[id.yx] = float4(0.525, 0.529, 0.365, 1);
+		}
+		if (cubeThere[iter] == 3) { // prairie
+			minMapTexture[id.yx] = float4(0.663, 0.595, 0.110, 1);
+		}
+		if (cubeThere[iter] == 4) { // riparianNoTree
+			minMapTexture[id.yx] = float4(0.569, 0.647, 0.224, 1);
+		}
+		if (cubeThere[iter] == 5) { // riparianTree
+			minMapTexture[id.yx] = float4(0.404, 0.443, 0.275, 1);
+		}
+		if (cubeThere[iter] == 6) { // uplandTrees
+			minMapTexture[id.yx] = float4(0.569, 0.525, 0.129, 1);
+		}
+
+		float r = cubeBuffer[len * len * 11 + iter];
+		fertilizerTextureResult[id.xy] = float4(r, r, r, 1.0);
+
+	}
+	if (fertilizerFlow == 1) {
+		//float temp = cubeBuffer[len * len * cubeThere[iter] + iter];
+
+		//accounting for the three fertilizer cases
+		if (cubeThere[iter] == 1) {// location being a crop
+			cubeBuffer[len * len * 11 + iter] += 0.07;
+		}
+		if (cubeThere[iter] >= 2 && cubeThere[iter] <= 6) {// location being a buffer
+			cubeBuffer[len * len * 11 + iter] = 0;
+		}
+		if (cubeThere[iter] == 0) {// location being empty
+			cubeBuffer[len * len * 11 + iter] -= 0.1;
+		}
+		
+
+		
+		//creating a blur effect
+		float sumTemp =
+			cubeBuffer[len * len * 11 + iterYp1Xp1] + cubeBuffer[len * len * 11 + iterXp1] + cubeBuffer[len * len * 11 + iterYm1Xp1] +
+			cubeBuffer[len * len * 11 + iterYp1] + cubeBuffer[len * len * 11 + iter] + cubeBuffer[len * len * 11 + iterYm1] +
+			cubeBuffer[len * len * 11 + iterYp1Xm1] + cubeBuffer[len * len * 11 + iterXm1] + cubeBuffer[len * len * 11 + iterYm1Xm1];
+		cubeBuffer[len * len * 11 + iter] = cubeBuffer[len * len * 11 + iter] * 0.6 + (sumTemp / 9.0) * 0.4;
+
+		// changing for dx
+
+		///*
+		//if (cubeBuffer[len * len * 9 + iter] > 0) { // 9 is Dx
+		//	cubeBuffer[len * len * 11 + iterXp1] = cubeBuffer[len * len * 11 + iterXp1] + abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		//	cubeBuffer[len * len * 11 + iter] = cubeBuffer[len * len * 11 + iter] - abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		//}
+		//else {
+		//	cubeBuffer[len * len * 11 + iterXm1] = cubeBuffer[len * len * 11 + iterXp1] + abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		//	cubeBuffer[len * len * 11 + iter] = cubeBuffer[len * len * 11 + iter] - abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		//}
+		//*/
+
+		// changing for dy
+
+		/*
+		if (cubeBuffer[len * len * 10 + iter] > 0) { // 9 is Dx
+			cubeBuffer[len * len * 11 + iterYp1] = cubeBuffer[len * len * 11 + iterYp1] - abs(cubeBuffer[len * len * 9 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+			cubeBuffer[len * len * 11 + iter] = cubeBuffer[len * len * 11 + iter] + abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		}
+		else {
+			cubeBuffer[len * len * 11 + iterYm1] = cubeBuffer[len * len * 11 + iterYp1] - abs(cubeBuffer[len * len * 9 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+			cubeBuffer[len * len * 11 + iter] = cubeBuffer[len * len * 11 + iter] + abs(cubeBuffer[len * len * 10 + iter]) * cubeBuffer[len * len * 11 + iter] * 0.25;
+		}
+		//*/
+
+		//clamping
+
+		cubeBuffer[len * len * 11 + iter] = clamp(cubeBuffer[len * len * 11 + iter], 0.0, 1.0);
+
+		// reset for season 1
+		if (season == 1) cubeBuffer[len * len * 11 + iter] = 0;
+
+
+
+		// finishing up
+		float a = cubeBuffer[len * len * 11 + iter];
+		if (cubeThere[iter] == 7) { // if it enters the river
+			fertilizerTextureResult[id.xy] = float4(a , a * 0.1, a * 0.1, 1.0);
+		}
+		else {
+			fertilizerTextureResult[id.xy] = float4(a * 0.5, a* 0.5, a * 0.5, 1.0);
+		}
+
+
+		/*
+		float r = cubeBuffer[len * len * 7 + iter]; 
+		float g = cubeBuffer[len * len * 9 + iter];
+		float b = cubeBuffer[len * len * 10 + iter];
+		fertilizerTextureResult[id.xy] = float4(r, abs(g), abs(b), 1.0);
+		*/
+
+		//
+		//
+		//
+		//calculating biodiversity flow
+		//
+		//
+
+		//accounting for the three biodiversity cases
+		
+		if (cubeThere[iter] >= 2 && cubeThere[iter] <= 6) {// location being a buffer
+			cubeBuffer[len * len * 12 + iter] += biodiversityFlow;
+		}
+		if (cubeThere[iter] == 0 || cubeThere[iter] == 1) {// location being empty or crop
+			cubeBuffer[len * len * 12 + iter] -= 0.1;
+			cubeBuffer[len * len * 12 + iter] = clamp(cubeBuffer[len * len * 12 + iter], 0.0, 1.0);
+		}
+
+		//creating a blur effect
+		sumTemp =
+			cubeBuffer[len * len * 12 + iterYp1Xp1] + cubeBuffer[len * len * 12 + iterXp1] + cubeBuffer[len * len * 12 + iterYm1Xp1] +
+			cubeBuffer[len * len * 12 + iterYp1] + cubeBuffer[len * len * 12 + iter] + cubeBuffer[len * len * 12 + iterYm1] +
+			cubeBuffer[len * len * 12 + iterYp1Xm1] + cubeBuffer[len * len * 12 + iterXm1] + cubeBuffer[len * len * 12 + iterYm1Xm1];
+		cubeBuffer[len * len * 12 + iter] = cubeBuffer[len * len * 12 + iter] * 0.6 + (sumTemp / 9.0) * 0.4;
+
+		//clamping
+
+		cubeBuffer[len * len * 12 + iter] = clamp(cubeBuffer[len * len * 12 + iter], 0.0, 1.0);
+
+		// reset for season 1
+		if (season == 1) cubeBuffer[len * len * 12 + iter] = 0;
+
+
+
+		// finishing up
+		//a = cubeBuffer[len * len * 12 + iter];
+		//biodiversityTextureResult[id.xy] = float4(a, a, a, 1.0);
+		//biodiversityTextureBlurResult[id.xy] = float4(a, a * 0.1, a * 0.1, 1.0);
+		
+	}
+}
+
+/*
+ blankField; // 0 // we dont actually need this
+ farmField; // 1
+ pollinator; // 2
+ prairie; // 3
+ riparianNoTree; // 4
+ riparianTrees; // 5
+ uplandTrees; // 6
+ river; // 7
+*/
+
+/*
+ blankField; // 0 // we dont actually need this
+ farmField; // 1
+ pollinator; // 2
+ prairie; // 3
+ riparianNoTree; // 4
+ riparianTrees; // 5
+ uplandTrees; // 6
+ waterbasin; // 7
+ height; // 8
+ waterbasinXd; // 9
+ waterbasinYd; // 10
+ fartilizer; // 10
+*/

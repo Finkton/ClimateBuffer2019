@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Button text="Button" style="background-image: url('/Assets/MadiVectors/bush-png-black-and-white--512.png'); height: 50px; width: 50px;">
+        <Style path="Assets/BaseUI.uss" />
+    </ui:Button>
+</ui:UXML>
